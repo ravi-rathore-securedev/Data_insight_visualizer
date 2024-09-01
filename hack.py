@@ -1,10 +1,13 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from fpdf import FPDF
+from io import BytesIO
+import os
 from streamlit_sortables import sort_items
 
 # Title of the app
-st.title('Insight Data Visualization')
+st.title('Insight Data Visualizer')
 
 # Sidebar for chart selection, file upload, image upload, and statistics
 with st.sidebar:
@@ -13,48 +16,48 @@ with st.sidebar:
     # File Upload
     uploaded_file = st.file_uploader("Upload Excel File", type="xlsx")
     
-    # Checkboxes for selecting multiple chart types
-    st.write("Select the charts you want to display:")
-    line_chart_selected = st.checkbox("Line Chart")
-    histogram_selected = st.checkbox("Histogram")
-    pie_chart_selected = st.checkbox("Pie Chart")
-    scatter_plot_selected = st.checkbox("Scatter Plot")
+    if uploaded_file is not None:
+        # Read the Excel file into a DataFrame
+        df = pd.read_excel(uploaded_file)
+        
+        # Assume the first column is the Timestamp or DateTime
+        timestamp_column = df.columns[0]
 
-    # Image Upload
-    st.header("Image Upload")
-    uploaded_image = st.file_uploader("Upload an Image", type=["png", "jpg", "jpeg"])
+        # Display column options for Y-axis selection (all columns except the timestamp)
+        y_columns = st.multiselect("Select fields for Y-axis (you can select multiple):", df.columns[1:])
+        
+        # Checkboxes for selecting multiple chart types
+        st.write("Select the charts you want to display:")
+        line_chart_selected = st.checkbox("Line Chart")
+        histogram_selected = st.checkbox("Histogram")
+        pie_chart_selected = st.checkbox("Pie Chart")
+        scatter_plot_selected = st.checkbox("Scatter Plot")
 
-    # Checkbox for displaying KPI Table and Statistics
-    st.header("Additional Insights")
-    kpi_selected = st.checkbox("Show KPI Table")
-    statistics_selected = st.checkbox("Show Statistics")
+        # Image Upload
+        st.header("Image Upload")
+        uploaded_image = st.file_uploader("Upload an Image", type=["png", "jpg", "jpeg"])
+
+        # Checkbox for displaying KPI Table and Statistics
+        st.header("Additional Insights")
+        kpi_selected = st.checkbox("Show KPI Table")
+        statistics_selected = st.checkbox("Show Statistics")
 
 # Main content area
-if uploaded_file is not None:
-    # Read the Excel file into a DataFrame
-    df = pd.read_excel(uploaded_file)
-    
+if uploaded_file is not None and y_columns:
     # Display raw data
     st.subheader("Raw Data from Excel:")
     st.dataframe(df)
-
-    # Define column names for X and Y axes
-    x_column = 'UF 2-TotalPermeateFlow-ML/day'
-    y_column = 'UF 2-PermeateTurbidity-NTU'
 
     # Generate KPI Table
     if kpi_selected:
         st.subheader("KPI Table")
         kpi_data = {
             'Total Rows': [len(df)],
-            'Mean of X': [df[x_column].mean()],
-            'Mean of Y': [df[y_column].mean()],
-            'Max of X': [df[x_column].max()],
-            'Max of Y': [df[y_column].max()],
-            'Min of X': [df[x_column].min()],
-            'Min of Y': [df[y_column].min()],
+            'Mean': df[y_columns].mean().tolist(),
+            'Max': df[y_columns].max().tolist(),
+            'Min': df[y_columns].min().tolist(),
         }
-        kpi_df = pd.DataFrame(kpi_data)
+        kpi_df = pd.DataFrame(kpi_data, index=y_columns)
         st.table(kpi_df)
 
     # Display Statistics
@@ -68,29 +71,31 @@ if uploaded_file is not None:
 
     # Generate the selected charts
     if line_chart_selected:
-        fig_line = px.line(df, x=x_column, y=y_column, title=f'{y_column} vs {x_column}',
-                           labels={x_column: x_column, y_column: y_column})
+        fig_line = px.line(df, x=timestamp_column, y=y_columns, title=f'Line Chart: {", ".join(y_columns)} vs {timestamp_column}')
         chart_titles.append('Line Chart')
         chart_figures['Line Chart'] = fig_line
         
     if histogram_selected:
-        fig_hist = px.histogram(df, x=y_column, nbins=10, title=f'Histogram of {y_column}',
-                                labels={y_column: y_column})
-        chart_titles.append('Histogram')
-        chart_figures['Histogram'] = fig_hist
+        for y_column in y_columns:
+            fig_hist = px.histogram(df, x=y_column, nbins=10, title=f'Histogram of {y_column}')
+            chart_titles.append(f'Histogram of {y_column}')
+            chart_figures[f'Histogram of {y_column}'] = fig_hist
         
     if pie_chart_selected:
-        df['Flow Categories'] = pd.cut(df[x_column], bins=5, labels=[f'Category {i}' for i in range(1, 6)])
-        flow_category_counts = df['Flow Categories'].value_counts()
-        fig_pie = px.pie(values=flow_category_counts, names=flow_category_counts.index, title='Flow Categories Distribution')
-        chart_titles.append('Pie Chart')
-        chart_figures['Pie Chart'] = fig_pie
+        for y_column in y_columns:
+            bins = pd.cut(df[y_column], bins=5)
+            bin_counts = bins.value_counts()
+            bin_labels = [str(interval) for interval in bin_counts.index]
+            
+            fig_pie = px.pie(values=bin_counts, names=bin_labels, title=f'Pie Chart of {y_column} Distribution')
+            chart_titles.append(f'Pie Chart of {y_column}')
+            chart_figures[f'Pie Chart of {y_column}'] = fig_pie
         
     if scatter_plot_selected:
-        fig_scatter = px.scatter(df, x=x_column, y=y_column, title=f'Scatter Plot of {y_column} vs {x_column}',
-                                 labels={x_column: x_column, y_column: y_column})
-        chart_titles.append('Scatter Plot')
-        chart_figures['Scatter Plot'] = fig_scatter
+        for y_column in y_columns:
+            fig_scatter = px.scatter(df, x=timestamp_column, y=y_column, title=f'Scatter Plot of {y_column} vs {timestamp_column}')
+            chart_titles.append(f'Scatter Plot of {y_column}')
+            chart_figures[f'Scatter Plot of {y_column}'] = fig_scatter
 
     # Render the charts in an interchangeable way
     sorted_titles = sort_items(chart_titles)
@@ -104,3 +109,33 @@ if uploaded_file is not None:
     if uploaded_image is not None:
         st.subheader("Uploaded Image:")
         st.image(uploaded_image, use_column_width=True)
+
+    # Add a button to download the report as PDF
+    if st.button("Download Report as PDF"):
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, 'Insight Data Visualizer Report', ln=True, align='C')
+
+        pdf.set_font("Arial", size=12)
+        pdf.multi_cell(0, 10, "Raw Data and Insights")
+
+        # Create a list of sorted figures for PDF export
+        for title in sorted_titles:
+            img_path = f"{title}.png"
+            if title in chart_figures:
+                chart_figures[title].write_image(img_path)
+                pdf.add_page()
+                pdf.cell(0, 10, title, ln=True, align='C')
+                pdf.image(img_path, x=10, y=20, w=180)
+                os.remove(img_path)
+
+        pdf_output = BytesIO()
+        pdf.output(pdf_output)
+        pdf_output.seek(0)
+
+        st.download_button(label="Download PDF", data=pdf_output, file_name="Insight_Data_Visualizer_Report.pdf", mime="application/pdf")
+else:
+    st.write("Please upload an Excel file and select at least one Y-axis field to proceed.")
